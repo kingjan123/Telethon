@@ -6,6 +6,7 @@ tl/all_tlobjects.py
 # User session
 *.session
 api/settings
+*.db
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

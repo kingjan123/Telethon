@@ -54,6 +54,7 @@ def generate_tlobjects(scheme_file):
         with open(filename, 'w', encoding='utf-8') as file:
             # Let's build the source code!
             with SourceBuilder(file) as builder:
+                # Both types and functions inherit from MTProtoRequest so they all can be sent
                 builder.writeln('from tl.mtproto_request import MTProtoRequest')
                 builder.writeln()
                 builder.writeln()
@@ -66,13 +67,12 @@ def generate_tlobjects(scheme_file):
                 builder.writeln()
 
                 # First sort the arguments so that those not being a flag come first
-                args = sorted([arg for arg in tlobject.args if not arg.flag_indicator],
+                args = sorted([arg for arg in tlobject.get_real_args()],
                               key=lambda x: x.is_flag)
 
                 # Then convert the args to string parameters, the flags having =None
                 args = [(arg.name if not arg.is_flag
-                        else '{}=None'.format(arg.name)) for arg in args
-                        if not arg.flag_indicator and not arg.generic_definition]
+                        else '{}=None'.format(arg.name)) for arg in args]
 
                 # Write the __init__ function
                 if args:
@@ -80,11 +80,9 @@ def generate_tlobjects(scheme_file):
                 else:
                     builder.writeln('def __init__(self):')
 
-                # Now update args to have the TLObject arguments, _except_
-                # those which are generated automatically: flag indicator and generic definitions.
-                # We don't need the generic definitions in Python because arguments can be any type
-                args = [arg for arg in tlobject.args
-                        if not arg.flag_indicator and not arg.generic_definition]
+                # Now update args to have the "real" TLObject arguments
+                # (this is, those which aren't generic definitions or flag indicators)
+                args = tlobject.get_real_args()
 
                 if args:
                     # Write the docstring, so we know the type of the arguments
@@ -105,6 +103,9 @@ def generate_tlobjects(scheme_file):
                     builder.writeln('self.result = None')
                     builder.writeln('self.confirmed = True  # Confirmed by default')
 
+                # Create an attribute that stores the TLObject's constructor ID
+                builder.writeln('self.constructor_id = {}'.format(hex(tlobject.id)))
+
                 # Set the arguments
                 if args:
                     # Leave an empty line if there are any args
@@ -115,7 +116,7 @@ def generate_tlobjects(scheme_file):
 
                 # Write the on_send(self, writer) function
                 builder.writeln('def on_send(self, writer):')
-                builder.writeln("writer.write_int({}, signed=False)  # {}'s constructor ID"
+                builder.writeln("writer.write_int(self.constructor_id, signed=False)"
                                 .format(hex(tlobject.id), tlobject.name))
 
                 for arg in tlobject.args:
@@ -134,6 +135,19 @@ def generate_tlobjects(scheme_file):
                     else:
                         # If there were no arguments, we still need an on_response method, and hence "pass" if empty
                         builder.writeln('pass')
+                builder.end_block()
+
+                # Write a function which allows us to uniquely identify this TLObject
+                builder.writeln('def get_unique_id(self):')
+
+                # This time sort the arguments by alphabetic order
+                args = ', '.join('self.{}'.format(arg.name)
+                                 for arg in sorted(tlobject.get_real_args(), key=lambda arg: arg.name))
+                if args:
+                    builder.writeln('return hash(tuple([self.constructor_id, {}]))'.format(args))
+                else:
+                    builder.writeln('return hash(tuple([self.constructor_id]))'.format(args))
+
                 builder.end_block()
 
                 # Write the __repr__(self) and __str__(self) functions

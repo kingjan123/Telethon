@@ -73,6 +73,12 @@ class TLObject:
                         result=match.group(3),
                         is_function=is_function)
 
+    def get_real_args(self):
+        """Returns the "real" rguments of the TLObject (those
+           which are neither flag indicator or generic definition)"""
+        return [a for a in self.args
+                if not a.flag_indicator and not a.generic_definition]
+
     def __repr__(self):
         fullname = ('{}.{}'.format(self.namespace, self.name) if self.namespace is not None
                     else self.name)
