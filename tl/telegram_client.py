@@ -6,6 +6,7 @@ import utils
 import network.authenticator
 
 from errors import *
+from db import Database
 from network import MtProtoSender, TcpTransport
 from parser.markdown_parser import parse_message_entities
 
@@ -32,6 +33,8 @@ class TelegramClient:
 
         self.session = Session.try_load_or_create_new(session_user_id)
         self.transport = TcpTransport(self.session.server_address, self.session.port)
+
+        self.database = Database()
 
         # These will be set later
         self.dc_options = None
@@ -193,6 +196,10 @@ class TelegramClient:
         # simply a messages TLObject. In the later case, no "count" attribute is specified:
         # the total messages count is retrieved by counting all the retrieved messages
         total_messages = getattr(result, 'count', len(result.messages))
+
+        for msg in result.messages:
+            self.database.insert_or_replace_object(msg)
+        self.database.commit()
 
         return (total_messages,
                 result.messages,

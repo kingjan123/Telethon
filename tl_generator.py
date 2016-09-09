@@ -142,6 +142,8 @@ def generate_tlobjects(scheme_file):
 
                 # This time sort the arguments by alphabetic order
                 args = ', '.join('self.{}'.format(arg.name)
+                                 if not arg.is_vector
+                                 else 'tuple(self.{0}) if self.{0} else None'.format(arg.name)
                                  for arg in sorted(tlobject.get_real_args(), key=lambda arg: arg.name))
                 if args:
                     builder.writeln('return hash(tuple([self.constructor_id, {}]))'.format(args))

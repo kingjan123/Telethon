@@ -53,6 +53,9 @@ class TLObject:
             ;$                 # Finally, the line should always end with ;
             ''', tl, re.IGNORECASE | re.VERBOSE)
 
+        if not match:
+            raise ValueError('Invalid .tl line given')
+
         # Sub-regex to match the arguments (sadly, it cannot be embedded in the first regex)
         args_match = re.findall(r'''
             (\{)?            # We may or may not capture the opening brace
@@ -158,6 +161,9 @@ class TLArg:
 
     def __str__(self):
         # Find the real type representation by updating it as required
+        if self.flag_indicator:
+            return 'flags:#'
+
         real_type = self.type
         if self.is_vector:
             real_type = 'Vector<{}>'.format(real_type)
