@@ -1,0 +1,14 @@
+# Include the license and readme file
+include LICENSE
+include README.md
+
+# Include the TL scheme file
+include telethon/scheme.tl
+
+# Exclude generated code
+exclude telethon/tl/all_tlobjects.py
+recursive-exclude telethon/tl/functions *
+recursive-exclude telethon/tl/types *
+
+# Exclude tests
+recursive-exclude telethon/unittests *

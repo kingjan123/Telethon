@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 from utils import BinaryWriter
 import hashlib
@@ -30,6 +31,16 @@ def load_settings(path='api/settings'):
                 settings[left] = right
 
     return settings
+
+
+def get_current_layer(path='scheme.tl'):
+    """Determines the current API layer"""
+    layer_regex = re.compile(r'//\s*LAYER\s*(\d+)')
+    with open(path, 'r', encoding='utf-8') as file:
+        for line in file:
+            match = layer_regex.match(line)
+            if match:
+                return int(match.group(1))
 
 
 def ensure_parent_dir_exists(file_path):

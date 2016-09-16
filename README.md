@@ -13,7 +13,6 @@ The project's **core only** is based on TLSharp, a C# Telegram client implementa
   - [Tips for porting Telethon](#tips-for-porting-telethon)
   - [Code generator limitations](#code-generator-limitations)
   - [Updating the `scheme.tl`](#updating-the-schemetl)
-- [Plans for the future](#plans-for-the-future)
 
 ## Why Telethon?
 > Why should I bother with Telethon? There are more mature projects already, such as
@@ -137,8 +136,3 @@ replacing the one you can find in this same directory by the updated one. Don't 
 afterwards and specifying the new layer number to be used when creating the `TelegramClient`.
 
 If the changes weren't too big, everything should still work the same way as it did before; but with extra features.
-
-## Plans for the future
-If everything works well, this probably ends up being a Python package :)
-
-But as of now, and until that happens, help is highly appreciated!

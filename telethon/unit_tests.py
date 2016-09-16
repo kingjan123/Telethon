@@ -2,8 +2,7 @@ import unittest
 
 
 if __name__ == '__main__':
-
-    from unittests import CryptoTests, ParserTests, TLTests, UtilsTests, NetworkTests
+    from .unittests import CryptoTests, ParserTests, TLTests, UtilsTests, NetworkTests
     test_classes = [CryptoTests, ParserTests, TLTests, UtilsTests]
 
     network = input('Run network tests (y/n)?: ').lower() == 'y'

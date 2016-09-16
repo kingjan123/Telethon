@@ -34,14 +34,22 @@ class TelegramClient:
 
     # region Initialization
 
-    def __init__(self, session_user_id, layer, api_id, api_hash):
+    def __init__(self, session_user_id, api_id, api_hash, version):
+        """Initializes the TelegramClient
+
+        :param session_user_id: The ID for the current session. This could be a name, such as "john"
+        :param api_id: Your Telegram API ID
+        :param api_hash: Your Telegram API Hash
+        :param version: The version of your application. Should be a string (i.e., 'x.y')
+        """
         if api_id is None or api_hash is None:
             raise PermissionError('Your API ID or Hash are invalid. Please read "Requirements" on README.md')
 
         self.api_id = api_id
         self.api_hash = api_hash
 
-        self.layer = layer
+        self.layer = utils.get_current_layer()
+        self.__version__ = version
 
         self.session = Session.try_load_or_create_new(session_user_id)
         self.transport = TcpTransport(self.session.server_address, self.session.port)
@@ -73,7 +81,7 @@ class TelegramClient:
             query = InitConnectionRequest(api_id=self.api_id,
                                           device_model=platform.node(),
                                           system_version=platform.system(),
-                                          app_version='0.4',
+                                          app_version=self.__version__,
                                           lang_code='en',
                                           query=GetConfigRequest())
 

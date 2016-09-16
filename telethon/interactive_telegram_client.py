@@ -1,18 +1,17 @@
-import tl_generator
+from telegram_client import TelegramClient
+from utils.helpers import load_settings
 from tl.types import UpdateShortChatMessage
 from tl.types import UpdateShortMessage
 
-if not tl_generator.tlobjects_exist():
-    import errors
-
-    raise errors.TLGeneratorNotRan()
-else:
-    del tl_generator
-
-from telegram_client import TelegramClient
-from utils.helpers import load_settings
 import shutil
 import traceback
+
+from tl_generator import TLGenerator
+if not TLGenerator.tlobjects_exist():
+    import errors
+    raise errors.TLGeneratorNotRan()
+else:
+    del TLGenerator
 
 # Get the (current) number of lines in the terminal
 cols, rows = shutil.get_terminal_size()
@@ -21,18 +20,18 @@ cols, rows = shutil.get_terminal_size()
 def print_title(title):
     # Clear previous window
     print('\n')
-    available_cols = cols - 2  # -2 sincewe omit '┌' and '┐'
+    available_cols = cols - 2  # -2 since we omit '┌' and '┐'
     print('┌{}┐'.format('─' * available_cols))
     print('│{}│'.format(title.center(available_cols)))
     print('└{}┘'.format('─' * available_cols))
 
 
 class InteractiveTelegramClient(TelegramClient):
-    def __init__(self, session_user_id, user_phone, layer, api_id, api_hash):
+    def __init__(self, session_user_id, user_phone, api_id, api_hash, version):
         print_title('Initialization')
 
         print('Initializing interactive example...')
-        super().__init__(session_user_id, layer, api_id, api_hash)
+        super().__init__(session_user_id, api_id, api_hash, version)
 
         # Store all the found media in memory here,
         # so it can be downloaded if the user wants
@@ -82,6 +81,7 @@ class InteractiveTelegramClient(TelegramClient):
                         i = None
 
                 except ValueError:
+                    i = None
                     pass
 
             # Retrieve the selected user
@@ -196,9 +196,9 @@ if __name__ == '__main__':
     client = InteractiveTelegramClient(
         session_user_id=settings.get('session_name', 'anonymous'),
         user_phone=str(settings['user_phone']),
-        layer=55,
         api_id=settings['api_id'],
-        api_hash=settings['api_hash'])
+        api_hash=settings['api_hash'],
+        version=settings['version'])
 
     print('Initialization done!')
 
