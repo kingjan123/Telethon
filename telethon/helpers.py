@@ -1,5 +1,9 @@
-import hashlib
+"""Various helpers not related to the Telegram API itself"""
+import asyncio
 import os
+import struct
+from hashlib import sha1, sha256
+
 
 # region Multiple utilities
 
@@ -15,66 +19,158 @@ def ensure_parent_dir_exists(file_path):
     if parent:
         os.makedirs(parent, exist_ok=True)
 
+
+def add_surrogate(text):
+    return ''.join(
+        # SMP -> Surrogate Pairs (Telegram offsets are calculated with these).
+        # See https://en.wikipedia.org/wiki/Plane_(Unicode)#Overview for more.
+        ''.join(chr(y) for y in struct.unpack('<HH', x.encode('utf-16le')))
+        if (0x10000 <= ord(x) <= 0x10FFFF) else x for x in text
+    )
+
+
+def del_surrogate(text):
+    return text.encode('utf-16', 'surrogatepass').decode('utf-16')
+
+
+def strip_text(text, entities):
+    """
+    Strips whitespace from the given text modifying the provided entities.
+
+    This assumes that there are no overlapping entities, that their length
+    is greater or equal to one, and that their length is not out of bounds.
+    """
+    if not entities:
+        return text.strip()
+
+    while text and text[-1].isspace():
+        e = entities[-1]
+        if e.offset + e.length == len(text):
+            if e.length == 1:
+                del entities[-1]
+                if not entities:
+                    return text.strip()
+            else:
+                e.length -= 1
+        text = text[:-1]
+
+    while text and text[0].isspace():
+        for i in reversed(range(len(entities))):
+            e = entities[i]
+            if e.offset != 0:
+                e.offset -= 1
+                continue
+
+            if e.length == 1:
+                del entities[0]
+                if not entities:
+                    return text.lstrip()
+            else:
+                e.length -= 1
+
+        text = text[1:]
+
+    return text
+
+
+def retry_range(retries):
+    """
+    Generates an integer sequence starting from 1. If `retries` is
+    not a zero or a positive integer value, the sequence will be
+    infinite, otherwise it will end at `retries + 1`.
+    """
+    yield 1
+    attempt = 0
+    while attempt != retries:
+        attempt += 1
+        yield 1 + attempt
+
+
+async def _cancel(log, **tasks):
+    """
+    Helper to cancel one or more tasks gracefully, logging exceptions.
+    """
+    for name, task in tasks.items():
+        if not task:
+            continue
+
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            log.exception('Unhandled exception from %s after cancel', name)
+
+
+def _sync_enter(self):
+    """
+    Helps to cut boilerplate on async context
+    managers that offer synchronous variants.
+    """
+    if hasattr(self, 'loop'):
+        loop = self.loop
+    else:
+        loop = self._client.loop
+
+    if loop.is_running():
+        raise RuntimeError(
+            'You must use "async with" if the event loop '
+            'is running (i.e. you are inside an "async def")'
+        )
+
+    return loop.run_until_complete(self.__aenter__())
+
+
+def _sync_exit(self, *args):
+    if hasattr(self, 'loop'):
+        loop = self.loop
+    else:
+        loop = self._client.loop
+
+    return loop.run_until_complete(self.__aexit__(*args))
+
+
 # endregion
 
 # region Cryptographic related utils
 
 
-def calc_key(shared_key, msg_key, client):
-    """Calculate the key based on Telegram guidelines, specifying whether it's the client or not"""
-    x = 0 if client else 8
-
-    sha1a = sha1(msg_key + shared_key[x:x + 32])
-    sha1b = sha1(shared_key[x + 32:x + 48] + msg_key + shared_key[x + 48:x +
-                                                                  64])
-    sha1c = sha1(shared_key[x + 64:x + 96] + msg_key)
-    sha1d = sha1(msg_key + shared_key[x + 96:x + 128])
-
-    key = sha1a[0:8] + sha1b[8:20] + sha1c[4:16]
-    iv = sha1a[8:20] + sha1b[0:8] + sha1c[16:20] + sha1d[0:8]
-
-    return key, iv
-
-
-def calc_msg_key(data):
-    """Calculates the message key from the given data"""
-    return sha1(data)[4:20]
-
-
-def generate_key_data_from_nonces(server_nonce, new_nonce):
-    """Generates the key data corresponding to the given nonces"""
-    hash1 = sha1(bytes(new_nonce + server_nonce))
-    hash2 = sha1(bytes(server_nonce + new_nonce))
-    hash3 = sha1(bytes(new_nonce + new_nonce))
+def generate_key_data_from_nonce(server_nonce, new_nonce):
+    """Generates the key data corresponding to the given nonce"""
+    server_nonce = server_nonce.to_bytes(16, 'little', signed=True)
+    new_nonce = new_nonce.to_bytes(32, 'little', signed=True)
+    hash1 = sha1(new_nonce + server_nonce).digest()
+    hash2 = sha1(server_nonce + new_nonce).digest()
+    hash3 = sha1(new_nonce + new_nonce).digest()
 
     key = hash1 + hash2[:12]
     iv = hash2[12:20] + hash3 + new_nonce[:4]
     return key, iv
 
 
-def sha1(data):
-    """Calculates the SHA1 digest for the given data"""
-    sha = hashlib.sha1()
-    sha.update(data)
-    return sha.digest()
+# endregion
+
+# region Custom Classes
 
 
-def sha256(data):
-    """Calculates the SHA256 digest for the given data"""
-    sha = hashlib.sha256()
-    sha.update(data)
-    return sha.digest()
+class TotalList(list):
+    """
+    A list with an extra `total` property, which may not match its `len`
+    since the total represents the total amount of items *available*
+    somewhere else, not the items *in this list*.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.total = 0
 
+    def __str__(self):
+        return '[{}, total={}]'.format(
+            ', '.join(str(x) for x in self), self.total)
 
-def get_password_hash(pw, current_salt):
-    """Gets the password hash for the two-step verification.
-       curent_salt should be the byte array provided by invoking GetPasswordRequest()"""
+    def __repr__(self):
+        return '[{}, total={}]'.format(
+            ', '.join(repr(x) for x in self), self.total)
 
-    # Passwords are encoded as UTF-8
-    # https://github.com/DrKLO/Telegram/blob/e31388/TMessagesProj/src/main/java/org/telegram/ui/LoginActivity.java#L2003
-    data = pw.encode('utf-8')
-
-    pw_hash = current_salt + data + current_salt
-    return sha256(pw_hash)
 
 # endregion

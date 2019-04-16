@@ -1,5 +1,13 @@
-from .mtproto_plain_sender import MtProtoPlainSender
-from .tcp_client import TcpClient
+"""
+This module contains several classes regarding network, low level connection
+with Telegram's servers and the protocol used (TCP full, abridged, etc.).
+"""
+from .mtprotoplainsender import MTProtoPlainSender
 from .authenticator import do_authentication
-from .mtproto_sender import MtProtoSender
-from .tcp_transport import TcpTransport
+from .mtprotosender import MTProtoSender
+from .connection import (
+    ConnectionTcpFull, ConnectionTcpIntermediate, ConnectionTcpAbridged,
+    ConnectionTcpObfuscated, ConnectionTcpMTProxyAbridged,
+    ConnectionTcpMTProxyIntermediate,
+    ConnectionTcpMTProxyRandomizedIntermediate, ConnectionHttp, TcpMTProxy
+)

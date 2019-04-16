@@ -1,12 +1,20 @@
-.idea
+# Docs
+_build/
+docs/
+
+# Generated code
 telethon/tl/functions/
 telethon/tl/types/
-telethon/tl/all_tlobjects.py
+telethon/tl/patched/
+telethon/tl/alltlobjects.py
+telethon/errors/rpcerrorlist.py
 
 # User session
 *.session
 usermedia/
-api/settings
+
+# Quick tests should live in this file
+example.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

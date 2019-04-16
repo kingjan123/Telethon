@@ -1,60 +1,122 @@
+"""
+This module holds several utilities regarding RSA and server fingerprints.
+"""
 import os
+import struct
+from hashlib import sha1
+try:
+    import rsa
+    import rsa.core
+except ImportError:
+    rsa = None
+    raise ImportError('Missing module "rsa", please install via pip.')
 
-import telethon.helpers as utils
-from telethon.utils import BinaryWriter
-
-
-class RSAServerKey:
-    def __init__(self, fingerprint, m, e):
-        self.fingerprint = fingerprint
-        self.m = m
-        self.e = e
-
-    def encrypt(self, data, offset=None, length=None):
-        """Encrypts the given data with the current key"""
-        if offset is None:
-            offset = 0
-        if length is None:
-            length = len(data)
-
-        with BinaryWriter() as writer:
-            # Write SHA
-            writer.write(utils.sha1(data[offset:offset + length]))
-            # Write data
-            writer.write(data[offset:offset + length])
-            # Add padding if required
-            if length < 235:
-                writer.write(os.urandom(235 - length))
-
-            result = int.from_bytes(writer.get_bytes(), byteorder='big')
-            result = pow(result, self.e, self.m)
-
-            # If the result byte count is less than 256, since the byte order is big,
-            # the non-used bytes on the left will be 0 and act as padding,
-            # without need of any additional checks
-            return int.to_bytes(
-                result, length=256, byteorder='big', signed=False)
+from ..tl import TLObject
 
 
-class RSA:
-    _server_keys = {
-        '216be86c022bb4c3': RSAServerKey('216be86c022bb4c3', int(
-            'C150023E2F70DB7985DED064759CFECF0AF328E69A41DAF4D6F01B538135A6F9'
-            '1F8F8B2A0EC9BA9720CE352EFCF6C5680FFC424BD634864902DE0B4BD6D49F4E'
-            '580230E3AE97D95C8B19442B3C0A10D8F5633FECEDD6926A7F6DAB0DDB7D457F'
-            '9EA81B8465FCD6FFFEED114011DF91C059CAEDAF97625F6C96ECC74725556934'
-            'EF781D866B34F011FCE4D835A090196E9A5F0E4449AF7EB697DDB9076494CA5F'
-            '81104A305B6DD27665722C46B60E5DF680FB16B210607EF217652E60236C255F'
-            '6A28315F4083A96791D7214BF64C1DF4FD0DB1944FB26A2A57031B32EEE64AD1'
-            '5A8BA68885CDE74A5BFC920F6ABF59BA5C75506373E7130F9042DA922179251F',
-            16), int('010001', 16))
-    }
+# {fingerprint: Crypto.PublicKey.RSA._RSAobj} dictionary
+_server_keys = {}
 
-    @staticmethod
-    def encrypt(fingerprint, data, offset=None, length=None):
-        """Encrypts the given data given a fingerprint"""
-        if fingerprint.lower() not in RSA._server_keys:
-            return None
 
-        key = RSA._server_keys[fingerprint.lower()]
-        return key.encrypt(data, offset, length)
+def get_byte_array(integer):
+    """Return the variable length bytes corresponding to the given int"""
+    # Operate in big endian (unlike most of Telegram API) since:
+    # > "...pq is a representation of a natural number
+    #    (in binary *big endian* format)..."
+    # > "...current value of dh_prime equals
+    #    (in *big-endian* byte order)..."
+    # Reference: https://core.telegram.org/mtproto/auth_key
+    return int.to_bytes(
+        integer,
+        (integer.bit_length() + 8 - 1) // 8,  # 8 bits per byte,
+        byteorder='big',
+        signed=False
+    )
+
+
+def _compute_fingerprint(key):
+    """
+    Given a RSA key, computes its fingerprint like Telegram does.
+
+    :param key: the Crypto.RSA key.
+    :return: its 8-bytes-long fingerprint.
+    """
+    n = TLObject.serialize_bytes(get_byte_array(key.n))
+    e = TLObject.serialize_bytes(get_byte_array(key.e))
+    # Telegram uses the last 8 bytes as the fingerprint
+    return struct.unpack('<q', sha1(n + e).digest()[-8:])[0]
+
+
+def add_key(pub):
+    """Adds a new public key to be used when encrypting new data is needed"""
+    global _server_keys
+    key = rsa.PublicKey.load_pkcs1(pub)
+    _server_keys[_compute_fingerprint(key)] = key
+
+
+def encrypt(fingerprint, data):
+    """
+    Encrypts the given data known the fingerprint to be used
+    in the way Telegram requires us to do so (sha1(data) + data + padding)
+
+    :param fingerprint: the fingerprint of the RSA key.
+    :param data: the data to be encrypted.
+    :return:
+        the cipher text, or None if no key matching this fingerprint is found.
+    """
+    global _server_keys
+    key = _server_keys.get(fingerprint, None)
+    if not key:
+        return None
+
+    # len(sha1.digest) is always 20, so we're left with 255 - 20 - x padding
+    to_encrypt = sha1(data).digest() + data + os.urandom(235 - len(data))
+
+    # rsa module rsa.encrypt adds 11 bits for padding which we don't want
+    # rsa module uses rsa.transform.bytes2int(to_encrypt), easier way:
+    payload = int.from_bytes(to_encrypt, 'big')
+    encrypted = rsa.core.encrypt_int(payload, key.e, key.n)
+    # rsa module uses transform.int2bytes(encrypted, keylength), easier:
+    block = encrypted.to_bytes(256, 'big')
+    return block
+
+
+# Add default keys
+for pub in (
+        '''-----BEGIN RSA PUBLIC KEY-----
+MIIBCgKCAQEAwVACPi9w23mF3tBkdZz+zwrzKOaaQdr01vAbU4E1pvkfj4sqDsm6
+lyDONS789sVoD/xCS9Y0hkkC3gtL1tSfTlgCMOOul9lcixlEKzwKENj1Yz/s7daS
+an9tqw3bfUV/nqgbhGX81v/+7RFAEd+RwFnK7a+XYl9sluzHRyVVaTTveB2GazTw
+Efzk2DWgkBluml8OREmvfraX3bkHZJTKX4EQSjBbbdJ2ZXIsRrYOXfaA+xayEGB+
+8hdlLmAjbCVfaigxX0CDqWeR1yFL9kwd9P0NsZRPsmoqVwMbMu7mStFai6aIhc3n
+Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB
+-----END RSA PUBLIC KEY-----''',
+
+        '''-----BEGIN RSA PUBLIC KEY-----
+MIIBCgKCAQEAxq7aeLAqJR20tkQQMfRn+ocfrtMlJsQ2Uksfs7Xcoo77jAid0bRt
+ksiVmT2HEIJUlRxfABoPBV8wY9zRTUMaMA654pUX41mhyVN+XoerGxFvrs9dF1Ru
+vCHbI02dM2ppPvyytvvMoefRoL5BTcpAihFgm5xCaakgsJ/tH5oVl74CdhQw8J5L
+xI/K++KJBUyZ26Uba1632cOiq05JBUW0Z2vWIOk4BLysk7+U9z+SxynKiZR3/xdi
+XvFKk01R3BHV+GUKM2RYazpS/P8v7eyKhAbKxOdRcFpHLlVwfjyM1VlDQrEZxsMp
+NTLYXb6Sce1Uov0YtNx5wEowlREH1WOTlwIDAQAB
+-----END RSA PUBLIC KEY-----''',
+
+        '''-----BEGIN RSA PUBLIC KEY-----
+MIIBCgKCAQEAsQZnSWVZNfClk29RcDTJQ76n8zZaiTGuUsi8sUhW8AS4PSbPKDm+
+DyJgdHDWdIF3HBzl7DHeFrILuqTs0vfS7Pa2NW8nUBwiaYQmPtwEa4n7bTmBVGsB
+1700/tz8wQWOLUlL2nMv+BPlDhxq4kmJCyJfgrIrHlX8sGPcPA4Y6Rwo0MSqYn3s
+g1Pu5gOKlaT9HKmE6wn5Sut6IiBjWozrRQ6n5h2RXNtO7O2qCDqjgB2vBxhV7B+z
+hRbLbCmW0tYMDsvPpX5M8fsO05svN+lKtCAuz1leFns8piZpptpSCFn7bWxiA9/f
+x5x17D7pfah3Sy2pA+NDXyzSlGcKdaUmwQIDAQAB
+-----END RSA PUBLIC KEY-----''',
+
+        '''-----BEGIN RSA PUBLIC KEY-----
+MIIBCgKCAQEAwqjFW0pi4reKGbkc9pK83Eunwj/k0G8ZTioMMPbZmW99GivMibwa
+xDM9RDWabEMyUtGoQC2ZcDeLWRK3W8jMP6dnEKAlvLkDLfC4fXYHzFO5KHEqF06i
+qAqBdmI1iBGdQv/OQCBcbXIWCGDY2AsiqLhlGQfPOI7/vvKc188rTriocgUtoTUc
+/n/sIUzkgwTqRyvWYynWARWzQg0I9olLBBC2q5RQJJlnYXZwyTL3y9tdb7zOHkks
+WV9IMQmZmyZh/N7sMbGWQpt4NMchGpPGeJ2e5gHBjDnlIf2p1yZOYeUYrdbwcS0t
+UiggS4UeE8TzIuXFQxw7fzEIlmhIaq3FnwIDAQAB
+-----END RSA PUBLIC KEY-----'''
+):
+    add_key(pub)
